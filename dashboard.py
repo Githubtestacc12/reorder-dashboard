@@ -31,12 +31,22 @@ def add_suggested_date(data: pd.DataFrame, buffer_days: int = 5) -> pd.DataFrame
     if "Days Until Out" not in data.columns:
         return data
     df_copy = data.copy()
+
+    # Round Days Until Out to nearest whole number
+    days_rounded = df_copy["Days Until Out"].round().fillna(0).astype(int)
+
     base_date = pd.to_datetime(datetime.now().date())
     df_copy["Suggested Reorder Date"] = base_date + pd.to_timedelta(
-        df_copy["Days Until Out"].fillna(0) - buffer_days, unit="D"
+        days_rounded - buffer_days, unit="D"
     )
-    # Don’t allow dates before today
-    df_copy.loc[df_copy["Suggested Reorder Date"] < base_date, "Suggested Reorder Date"] = base_date
+
+    # Clip to today if result is in the past
+    today = pd.to_datetime(datetime.now().date())
+    df_copy.loc[df_copy["Suggested Reorder Date"] < today, "Suggested Reorder Date"] = today
+
+    # Keep only the date (no time)
+    df_copy["Suggested Reorder Date"] = df_copy["Suggested Reorder Date"].dt.date
+
     return df_copy
 
 df = add_suggested_date(df, buffer_days=5)
@@ -45,7 +55,7 @@ df = add_suggested_date(df, buffer_days=5)
 # Title & info
 # ------------------------------------------------------
 st.title("📊 Reorder Report Dashboard")
-st.caption(f"Last updated: {datetime.now():%Y-%m-%d %H:%M}")
+st.caption(f"Last updated: {datetime.now():%Y-%m-%d}")
 
 # ------------------------------------------------------
 # Sidebar filters
@@ -107,11 +117,11 @@ filtered = df[
 ]
 
 # ------------------------------------------------------
-# KPI cards
+# KPI cards (rounded)
 # ------------------------------------------------------
 col1, col2, col3, col4 = st.columns(4)
 if not filtered.empty:
-    total_items = len(filtered)
+    total_items = int(len(filtered))
     need_reorder = int((filtered["Status"] == "Reorder Soon").sum())
     avg_days = int(round(filtered["Days Until Out"].mean(skipna=True))) if not filtered["Days Until Out"].dropna().empty else 0
     total_qty = int(round(filtered["Suggested Order Qty"].sum(skipna=True)))
