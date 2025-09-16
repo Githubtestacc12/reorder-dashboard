@@ -12,7 +12,7 @@ names = ["Administrator"]
 usernames = ["admin"]
 passwords = ["admin30303"]  # demo only!
 
-hashed_passwords = stauth.Hasher(passwords).generate()
+hashed_passwords = stauth.Hasher().generate(passwords)
 
 authenticator = stauth.Authenticate(
     names,
@@ -211,3 +211,4 @@ if authentication_status:
         new_df = pd.read_excel(uploaded)
         st.success("✅ New report loaded below:")
         st.dataframe(new_df, use_container_width=True)
+
