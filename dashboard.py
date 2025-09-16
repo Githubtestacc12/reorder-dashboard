@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ------------------------------------------------------
 # Page setup
@@ -25,6 +25,23 @@ if not report_path.exists():
 df = load_data(report_path)
 
 # ------------------------------------------------------
+# Add Suggested Reorder Date
+# ------------------------------------------------------
+def add_suggested_date(data: pd.DataFrame, buffer_days: int = 5) -> pd.DataFrame:
+    if "Days Until Out" not in data.columns:
+        return data
+    df_copy = data.copy()
+    base_date = pd.to_datetime(datetime.now().date())
+    df_copy["Suggested Reorder Date"] = base_date + pd.to_timedelta(
+        df_copy["Days Until Out"].fillna(0) - buffer_days, unit="D"
+    )
+    # Don’t allow dates before today
+    df_copy.loc[df_copy["Suggested Reorder Date"] < base_date, "Suggested Reorder Date"] = base_date
+    return df_copy
+
+df = add_suggested_date(df, buffer_days=5)
+
+# ------------------------------------------------------
 # Title & info
 # ------------------------------------------------------
 st.title("📊 Reorder Report Dashboard")
@@ -35,43 +52,29 @@ st.caption(f"Last updated: {datetime.now():%Y-%m-%d %H:%M}")
 # ------------------------------------------------------
 st.sidebar.header("Filters")
 
-# --- Customer filter (with Select All) ---
 cust_values = sorted(df["Customer"].fillna("(Blank)").unique())
 sel_all_cust = st.sidebar.checkbox("Select All Customers", value=True)
-customers = (
-    cust_values if sel_all_cust
-    else st.sidebar.multiselect("Customer", cust_values, default=[])
-)
+customers = cust_values if sel_all_cust else st.sidebar.multiselect("Customer", cust_values, default=[])
 mask_customer = df["Customer"].fillna("(Blank)").isin(customers)
 
-# --- Item filter (depends on selected customers, with Select All) ---
 item_col = "Item" if "Item" in df.columns else "Item #"
 available_items = df.loc[mask_customer, item_col].fillna("(Blank)").unique()
 item_values_str = sorted([str(v) for v in available_items])
 sel_all_items = st.sidebar.checkbox("Select All Items", value=True)
-items = (
-    item_values_str if sel_all_items
-    else st.sidebar.multiselect("Item", item_values_str, default=[])
-)
+items = item_values_str if sel_all_items else st.sidebar.multiselect("Item", item_values_str, default=[])
 mask_item = df[item_col].fillna("(Blank)").astype(str).isin(items)
 
-# --- Status option (radio) ---
 status_choice = st.sidebar.radio(
     "Show rows with status:",
     options=["All", "Reorder Soon", "OK"],
     index=0
 )
-if status_choice == "All":
-    mask_status = True
-else:
-    mask_status = df["Status"].fillna("(Blank)") == status_choice
+mask_status = True if status_choice == "All" else df["Status"].fillna("(Blank)") == status_choice
 
-# --- Days Until Out slider ---
 max_days = int(df["Days Until Out"].max(skipna=True))
 days_slider = st.sidebar.slider("Max Days Until Out", 0, max_days, max_days)
 mask_days = (df["Days Until Out"] <= days_slider) | df["Days Until Out"].isna()
 
-# --- Date range filter ---
 if "Last Due" in df.columns:
     min_date, max_date = df["Last Due"].min(), df["Last Due"].max()
     date_range = st.sidebar.date_input("Last Due Range", [min_date, max_date])
@@ -83,17 +86,13 @@ if "Last Due" in df.columns:
 else:
     mask_date = True
 
-# --- Global search ---
 query = st.sidebar.text_input("🔎 Search (any text)")
 mask_search = (
     df.astype(str).apply(lambda r: r.str.contains(query, case=False, na=False), axis=1)
     if query else True
 )
 
-# --- Toggle for bar chart ---
-show_bar = st.sidebar.checkbox(
-    "Show bar chart: Suggested Order Qty by Customer", value=True
-)
+show_bar = st.sidebar.checkbox("Show bar chart: Suggested Order Qty by Customer", value=True)
 
 # ------------------------------------------------------
 # Apply all masks
@@ -135,7 +134,10 @@ def highlight_status(row):
 
 st.subheader("Detailed Records")
 if not filtered.empty:
-    st.dataframe(filtered.style.apply(highlight_status, axis=1), use_container_width=True)
+    cols = filtered.columns.tolist()
+    if "Days Until Out" in cols and "Suggested Reorder Date" in cols:
+        cols.insert(cols.index("Days Until Out") + 1, cols.pop(cols.index("Suggested Reorder Date")))
+    st.dataframe(filtered[cols].style.apply(highlight_status, axis=1), use_container_width=True)
 else:
     st.info("No rows to display with current filters.")
 
