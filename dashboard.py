@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ------------------------------------------------------
 # Page setup
@@ -25,28 +25,23 @@ if not report_path.exists():
 df = load_data(report_path)
 
 # ------------------------------------------------------
-# Add Suggested Reorder Date
+# Add Suggested Reorder Date (rounded)
 # ------------------------------------------------------
 def add_suggested_date(data: pd.DataFrame, buffer_days: int = 5) -> pd.DataFrame:
     if "Days Until Out" not in data.columns:
         return data
     df_copy = data.copy()
 
-    # Round Days Until Out to nearest whole number
     days_rounded = df_copy["Days Until Out"].round().fillna(0).astype(int)
-
     base_date = pd.to_datetime(datetime.now().date())
-    df_copy["Suggested Reorder Date"] = base_date + pd.to_timedelta(
-        days_rounded - buffer_days, unit="D"
-    )
 
-    # Clip to today if result is in the past
-    today = pd.to_datetime(datetime.now().date())
+    df_copy["Suggested Reorder Date"] = (
+        base_date + pd.to_timedelta(days_rounded - buffer_days, unit="D")
+    ).dt.date
+
+    # Prevent past dates
+    today = datetime.now().date()
     df_copy.loc[df_copy["Suggested Reorder Date"] < today, "Suggested Reorder Date"] = today
-
-    # Keep only the date (no time)
-    df_copy["Suggested Reorder Date"] = df_copy["Suggested Reorder Date"].dt.date
-
     return df_copy
 
 df = add_suggested_date(df, buffer_days=5)
@@ -144,10 +139,21 @@ def highlight_status(row):
 
 st.subheader("Detailed Records")
 if not filtered.empty:
-    cols = filtered.columns.tolist()
+    # Round numeric columns & format date
+    display_df = filtered.copy()
+
+    for col in display_df.select_dtypes(include="number").columns:
+        display_df[col] = display_df[col].round(0).astype(int)
+
+    if "Suggested Reorder Date" in display_df.columns:
+        display_df["Suggested Reorder Date"] = display_df["Suggested Reorder Date"].astype(str)
+
+    cols = display_df.columns.tolist()
     if "Days Until Out" in cols and "Suggested Reorder Date" in cols:
         cols.insert(cols.index("Days Until Out") + 1, cols.pop(cols.index("Suggested Reorder Date")))
-    st.dataframe(filtered[cols].style.apply(highlight_status, axis=1), use_container_width=True)
+
+    styled = display_df[cols].style.apply(highlight_status, axis=1)
+    st.dataframe(styled, use_container_width=True)
 else:
     st.info("No rows to display with current filters.")
 
@@ -190,7 +196,13 @@ else:
 # ------------------------------------------------------
 # Download filtered data
 # ------------------------------------------------------
-csv_bytes = filtered.to_csv(index=False).encode()
+export_df = filtered.copy()
+for col in export_df.select_dtypes(include="number").columns:
+    export_df[col] = export_df[col].round(0).astype(int)
+if "Suggested Reorder Date" in export_df.columns:
+    export_df["Suggested Reorder Date"] = export_df["Suggested Reorder Date"].astype(str)
+
+csv_bytes = export_df.to_csv(index=False).encode()
 st.download_button(
     "💾 Download filtered data as CSV",
     csv_bytes,
